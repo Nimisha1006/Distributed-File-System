@@ -4,7 +4,6 @@ A backend system that stores files reliably across multiple nodes by splitting t
 
 > "Storage is easy. Failure is the real problem."
 
----
 
 ## Architecture
 Client (HTTP)
@@ -24,7 +23,7 @@ node_1/
 node_2/
 node_3/
 
----
+
 
 ## Key Features
 
