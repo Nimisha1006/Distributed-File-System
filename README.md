@@ -7,7 +7,7 @@ A backend system that stores files reliably across multiple nodes by splitting t
 ## Architecture
 
 ```
-Client (HTTP)
+    Client (HTTP)
       │
       ▼
 ┌─────────────────────────┐
