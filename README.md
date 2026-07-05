@@ -4,8 +4,9 @@ A backend system that stores files reliably across multiple nodes by splitting t
 
 > "Storage is easy. Failure is the real problem."
 
-
 ## Architecture
+
+```
 Client (HTTP)
       │
       ▼
@@ -15,20 +16,19 @@ Client (HTTP)
 └────────┬────────┬───────┘
          │        │
          ▼        ▼
-┌──────────────┐  ┌─────────────────────────────┐
-│  PostgreSQL  │  │     Storage Layer            │
-│              │  │  node_1  node_2  node_3      │
-│  files       │  │  ├─ chunk_0.bin (primary)    │
-│  chunks      │  │  ├─ chunk_1.bin (replica)    │
-│  · node_path │  │  └─ SHA-256 verified         │
-│  · checksum  │  └─────────────────────────────┘
+┌──────────────┐  ┌──────────────────────────┐
+│  PostgreSQL  │  │  Storage Layer           │
+│  files       │  │  node_1  node_2  node_3  │
+│  chunks      │  │  · primary + replica     │
+│  · node_path │  │  · SHA-256 verified      │
+│  · checksum  │  └──────────────────────────┘
 │  · is_replica│
 └──────────────┘
 
 Reconstruction: DB → read primary → verify checksum
-                   → fallback to replica if corrupted/missing
-                   → merge chunks → original file
-
+              → fallback to replica if corrupted
+              → merge chunks → original file
+```
 
 
 ## Key Features
