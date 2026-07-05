@@ -7,21 +7,27 @@ A backend system that stores files reliably across multiple nodes by splitting t
 
 ## Architecture
 Client (HTTP)
-│
-▼
-FastAPI (app/main.py)
-│
-├──── Metadata Operations ──── PostgreSQL
-│                                  │
-│                            files table
-│                            chunks table
-│                         (node_path, checksum,
-│                            is_replica)
-│
-└──── Chunk Storage ────── Local Filesystem
-node_1/
-node_2/
-node_3/
+      │
+      ▼
+┌─────────────────────────┐
+│   FastAPI (main.py)     │
+│   coordinator + routing │
+└────────┬────────┬───────┘
+         │        │
+         ▼        ▼
+┌──────────────┐  ┌─────────────────────────────┐
+│  PostgreSQL  │  │     Storage Layer            │
+│              │  │  node_1  node_2  node_3      │
+│  files       │  │  ├─ chunk_0.bin (primary)    │
+│  chunks      │  │  ├─ chunk_1.bin (replica)    │
+│  · node_path │  │  └─ SHA-256 verified         │
+│  · checksum  │  └─────────────────────────────┘
+│  · is_replica│
+└──────────────┘
+
+Reconstruction: DB → read primary → verify checksum
+                   → fallback to replica if corrupted/missing
+                   → merge chunks → original file
 
 
 
