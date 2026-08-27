@@ -89,18 +89,29 @@ def upload_chunk(file_id: int, chunk_index: int, data: bytes):
     conn = get_connection()
     cur = conn.cursor()
     try:
-        # 1. Check file exists
+        # Check file exists
         cur.execute("SELECT total_chunks FROM files WHERE id = %s", (file_id,))
         row = cur.fetchone()
         if not row:
             return None
         total_chunks = row[0]
 
-        # 2. Physically store the chunk
+        # WAL step 1 — log IN_PROGRESS before doing anything
+        cur.execute(
+            """
+            INSERT INTO upload_log (file_id, chunk_index, status)
+            VALUES (%s, %s, 'IN_PROGRESS')
+            ON CONFLICT (file_id, chunk_index) 
+            DO UPDATE SET status = 'IN_PROGRESS', attempted_at = CURRENT_TIMESTAMP
+            """,
+            (file_id, chunk_index)
+        )
+        conn.commit()
+
+        # WAL step 2 — physically store chunk + replicate
         result = store_chunk(file_id, chunk_index, data)
 
-        # 3. Insert primary and replica chunk records into DB
-        # 3. Insert primary and replica chunk records into DB with checksum
+        # WAL step 3 — insert primary and replica into chunks table
         cur.execute(
             """
             INSERT INTO chunks (file_id, chunk_index, node_path, is_replica, checksum)
@@ -118,13 +129,22 @@ def upload_chunk(file_id: int, chunk_index: int, data: bytes):
             (file_id, chunk_index, result["replica_node"], True, result["checksum"])
         )
 
-        # 4. Check if all chunks are uploaded
+        # WAL step 4 — mark COMPLETE in log
+        cur.execute(
+            """
+            UPDATE upload_log 
+            SET status = 'COMPLETE', completed_at = CURRENT_TIMESTAMP
+            WHERE file_id = %s AND chunk_index = %s
+            """,
+            (file_id, chunk_index)
+        )
+
+        # Check if all chunks are done
         cur.execute(
             "SELECT COUNT(*) FROM chunks WHERE file_id = %s AND is_replica = FALSE",
             (file_id,)
         )
         uploaded_count = cur.fetchone()[0]
-
         if uploaded_count == total_chunks:
             cur.execute(
                 "UPDATE files SET status = %s WHERE id = %s",
@@ -136,7 +156,68 @@ def upload_chunk(file_id: int, chunk_index: int, data: bytes):
 
     except Exception as e:
         conn.rollback()
+        # WAL — mark FAILED so client knows this chunk needs retry
+        try:
+            cur.execute(
+                """
+                UPDATE upload_log 
+                SET status = 'FAILED'
+                WHERE file_id = %s AND chunk_index = %s
+                """,
+                (file_id, chunk_index)
+            )
+            conn.commit()
+        except:
+            pass
         raise e
+    finally:
+        cur.close()
+        conn.close()
+
+def get_resume_point(file_id: int):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # Get all completed chunks
+        cur.execute(
+            """
+            SELECT chunk_index FROM upload_log
+            WHERE file_id = %s AND status = 'COMPLETE'
+            ORDER BY chunk_index ASC
+            """,
+            (file_id,)
+        )
+        completed = [row[0] for row in cur.fetchall()]
+
+        # Get failed chunks that need retry
+        cur.execute(
+            """
+            SELECT chunk_index FROM upload_log
+            WHERE file_id = %s AND status = 'FAILED'
+            ORDER BY chunk_index ASC
+            """,
+            (file_id,)
+        )
+        failed = [row[0] for row in cur.fetchall()]
+
+        # Get total chunks expected
+        cur.execute("SELECT total_chunks FROM files WHERE id = %s", (file_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        total_chunks = row[0]
+
+        next_chunk = len(completed)
+
+        return {
+            "file_id": file_id,
+            "total_chunks": total_chunks,
+            "completed_chunks": completed,
+            "failed_chunks": failed,
+            "next_chunk_to_upload": next_chunk,
+            "resume_from": next_chunk
+        }
+
     finally:
         cur.close()
         conn.close()

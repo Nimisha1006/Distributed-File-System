@@ -60,3 +60,10 @@ def reconstruct(file_id: int):
         "message": "File reconstructed successfully",
         "path": path
     }
+
+@app.get("/files/{file_id}/resume")
+def get_resume_point(file_id: int):
+    point = metadata.get_resume_point(file_id)
+    if not point:
+        raise HTTPException(status_code=404, detail="File not found")
+    return point
